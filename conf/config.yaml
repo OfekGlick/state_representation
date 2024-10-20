@@ -1,0 +1,9 @@
+# This is the configuration file for the project. It contains the paths to the models and environments used in the project.
+
+env:
+  simple: false
+
+model:
+  llava: false
+  llama: false
+  deepseekcoder: false
