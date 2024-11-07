@@ -3,3 +3,7 @@ stable_baselines3
 pettingzoo
 pygame
 hydra-core
+opencv-python
+langchain-google-genai
+google-generativeai
+miniworld
