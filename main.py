@@ -31,36 +31,6 @@ def main(dict_config: omegaconf.DictConfig):
         raise ValueError(f"Please specify a valid environment in the config file.")
 
 
-    vec_env = DummyVecEnv([lambda: gym_env])
-
-    obs = vec_env.reset()
-    state_representor = Textual_State_Representor(
-        textual_representation_model=Models.LLaMaInstruct,
-        env_description=env_description,
-        task_distribution=env_task_distribution,
-    )
-
-    model = PPO('MlpPolicy', vec_env, verbose=1)
-
-    # Train the model
-    model.learn(total_timesteps=10)
-
-    # Save the model
-    model.save("ppo_pettingzoo")
-
-    # Load the model
-    model = PPO.load("ppo_pettingzoo")
-    for _ in range(1000):
-        action, _states = model.predict(obs)
-        obs, rewards, dones, info = vec_env.step(action)
-        image = vec_env.render(mode='rgb_array')
-        gym_env.display_image(image)
-        # text_repr = state_representor.generate_textual_state_representation(image)
-        # print(text_repr)
-        # code_repr = state_representor.generate_code_state_representation(text_repr)
-        # print(code_repr)
-        vec_env.render()
-
 
 if __name__ == '__main__':
     main()

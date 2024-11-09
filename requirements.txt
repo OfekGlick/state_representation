@@ -1,9 +1,13 @@
-lmdeploy
 stable_baselines3
+lmdeploy
+miniworld
+moviepy
+torch
+torchvision
 pettingzoo
 pygame
 hydra-core
 opencv-python
 langchain-google-genai
 google-generativeai
-miniworld
+tensorboard
