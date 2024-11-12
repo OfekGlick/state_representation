@@ -1,22 +1,21 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, AutoProcessor
 import torch
-import gymnasium as gym
 import os
 import sys
-from base_state_representor import AbstractStateRepresentor
+from .base_state_representor import AbstractStateRepresentor
 from langchain_google_genai import GoogleGenerativeAI
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 import json
+
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
-import constants
 
 
 class Function_Calling_State_Representor(AbstractStateRepresentor):
     """
     Class to generate state representations using a foundation model
     """
+
     def __init__(self, env_description: str, task_distribution: str, api_key: str = None):
         """
         Initialize the State Representor
@@ -35,90 +34,135 @@ class Function_Calling_State_Representor(AbstractStateRepresentor):
             except:
                 raise ValueError("Please set GOOGLE_API_KEY environment variable")
 
+        self.llm = GoogleGenerativeAI(model="gemini-pro",
+                                      google_api_key=self.api_key,
+                                      temperature=0)
+        self.setup_parser()
+        self.prompt = self.create_prompt()
+
     def setup_parser(self):
         """Set up the output parser for structured JSON responses"""
-        response_schemas = [
-            ResponseSchema(
-                name="objects",
-                description="A dictionary where keys are object names and values are [x,y] coordinate pairs",
-            )
-        ]
-        return StructuredOutputParser.from_response_schemas(response_schemas)
+        selected_features_schema = ResponseSchema(
+            name="selected_features",
+            description="Dictionary of selected features that are relevant for the task",
+            type="dict"
+        )
+
+        reasoning_schema = ResponseSchema(
+            name="reasoning",
+            description="Explanation for why each feature was selected or excluded",
+            type="str"
+        )
+
+        self.output_parser = StructuredOutputParser.from_response_schemas([
+            selected_features_schema,
+            reasoning_schema
+        ])
+        self.format_instructions = self.output_parser.get_format_instructions()
 
     def create_prompt(self):
-        """Create the prompt template for image description parsing"""
-        template = """
-        You are an expert at inferring which semantic information is relevant to performing tasks.
-        Given a an observation, a description of an environment, and a description of a task - extract all relevant 
-        objects. 
-        Convert descriptions in natural language to a PDDL representation.
-                
-        The description: {image_description}
+        """Create the prompt for the LLM to select features"""
+        template = """You are an AI tasked with selecting relevant features from an environment for a reinforcement learning agent.
 
-        {format_instructions}
+Environment Description: {env_description}
+Task Description: {task_distribution}
 
-        Return ONLY a valid JSON object.
-        """
+Given the current features dictionary: {features_dict}
+
+Select only the features that are relevant for completing the task. Consider:
+1. Which features directly affect the agent's ability to complete the task?
+2. Which features provide necessary information about the environment state?
+3. Which features can be safely ignored without impacting task performance?
+
+{format_instructions}
+
+Return:
+1. A dictionary of selected features and their values
+2. A brief explanation of why each feature was selected or excluded
+
+Remember to maintain the original data types of the features (numbers, strings, booleans, etc)."""
+
         return PromptTemplate(
             template=template,
-            input_variables=["image_description"],
-            partial_variables={"format_instructions": self.setup_parser().get_format_instructions()}
+            input_variables=["features_dict"],
+            partial_variables={
+                "env_description": self.env_description,
+                "task_distribution": self.task_distribution,
+                "format_instructions": self.format_instructions
+            }
         )
 
-    def parse_image_description(self, description: str) -> dict:
+    def select_features(self, features_dict: str, **kwargs):
         """
-        Parse an image description and return object coordinates
-
+        Select relevant features from the features dictionary
         Args:
-            description: Natural language description of image
+            features_dict: Dictionary of all available features and their values
+            **kwargs: Additional keyword arguments
 
         Returns:
-            Dictionary mapping object names to their [x,y] coordinates
+            dict: Dictionary of selected features
         """
-        # Initialize components
-        llm = GoogleGenerativeAI(
-            model="gemini-pro",
-            google_api_key=self.api_key,
-            temperature=0.1  # Lower temperature for more consistent outputs
-        )
-        prompt = self.create_prompt()
-        parser = self.setup_parser()
+        # Convert dictionary to string if it isn't already
+        if isinstance(features_dict, dict):
+            features_dict = {k: repr(v) for k, v in features_dict.items()}
+            features_dict = json.dumps(features_dict, indent=2)
 
-        # Generate prompt with image description
-        formatted_prompt = prompt.format(image_description=description)
+        # Format the prompt with the features dictionary
+        formatted_prompt = self.prompt.format(features_dict=features_dict)
+
+        # Get response from LLM
+        response = self.llm.invoke(formatted_prompt)
 
         try:
-            # Get response from LLM
-            response = llm.invoke(formatted_prompt)
-            # Parse the response into structured format
-            parsed_output = parser.parse(response)
-            return parsed_output["objects"]
+            # Parse the response into structured output
+            parsed_output = self.output_parser.parse(response)
+            selected_features = parsed_output["selected_features"]
+
+            # Log the reasoning if debug information is requested
+            if kwargs.get('debug', False):
+                print("Selection reasoning:", parsed_output["reasoning"])
+
+            return selected_features
+
         except Exception as e:
-            print(f"Error parsing response: {e}")
-            return {}
-
-    def generate_state_representation(self, obs_description: str, **kwargs):
-        coordinates = self.parse_image_description(obs_description)
-        print(f"Coordinates: {coordinates}")
-
-    def create_gym_observation_space(self, description: str, **kwargs) -> gym.Space:
-        pass
+            print(f"Error parsing LLM response: {e}")
+            print(f"Raw response: {response}")
+            # Return original features as fallback
+            return features_dict
 
 
 if __name__ == '__main__':
-    description = """
-        A large oak tree stands in the center of the image. 
-        There's a red bird perched on a branch in the top right corner.
-        A small rabbit sits near the base of the tree, slightly to the left.
-        In the far background, there's a wooden fence running along the bottom.
-        """
+    # Example usage
+    env_description = """
+    A 2D grid world environment with dimensions 10x10. The agent can move in four directions: up, down, left, right.
+    The environment contains various colored squares (red, blue, green) placed randomly on the grid.
+    """
 
-    env_description = constants.SimpleConstants.ENV_DESCRIPTION
-    task_description = constants.SimpleConstants.TASK_DESCRIPTION
+    task_description = """
+    The agent needs to find and reach the red square while avoiding blue squares.
+    The episode ends when the agent reaches the red square or hits a blue square.
+    """
 
+    # Example features dictionary
+    features = {
+        "agent_position": (2, 3),
+        "agent_orientation": "north",
+        "red_square_position": (8, 8),
+        "blue_squares_positions": [(3, 3), (4, 6)],
+        "green_squares_positions": [(1, 1), (5, 5)],
+        "sky_color": "blue",
+        "temperature": 22,
+        "wind_speed": 5,
+        "time_of_day": "noon",
+        "visibility_radius": 5
+    }
+
+    # Initialize the state representor
     state_representor = Function_Calling_State_Representor(
         env_description=env_description,
-        task_distribution=task_description,
-        # api_key=os.getenv("GOOGLE_API_KEY")
+        task_distribution=task_description
     )
-    state_representor.generate_state_representation(description)
+
+    # Get selected features
+    selected_features = state_representor.select_features(features, debug=True)
+    print("\nSelected features:", selected_features.keys())

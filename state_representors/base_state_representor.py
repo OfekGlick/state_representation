@@ -18,7 +18,7 @@ class AbstractStateRepresentor(ABC):
         self.task_distribution = task_distribution
 
     @abstractmethod
-    def generate_state_representation(self, obs_description: str, **kwargs) -> str:
+    def select_features(self, obs_description: str, **kwargs) -> str:
         """
         Generate a state representation using a foundation model.
 
@@ -28,4 +28,4 @@ class AbstractStateRepresentor(ABC):
         Returns:
             str: The generated state representation.
         """
-        pass
+        raise NotImplementedError

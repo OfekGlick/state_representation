@@ -1,41 +1,129 @@
-import gym
-from stable_baselines3 import PPO, DQN, A2C
-from stable_baselines3.common.env_util import make_vec_env
+from typing import List, Type, Optional
+from pathlib import Path
+from gymnasium.wrappers import RecordVideo
+from tqdm import trange
+from utils import Algorithm, Environment
+from state_representors.function_calling_state_representation import Function_Calling_State_Representor
 
 
 class ExperimentManager:
+    """
+    A class to manage reinforcement learning experiments with different feature sets.
+    """
+
     def __init__(
             self,
-            env_id,
-            log_dir="./logs",
-            model_save_path="./models",
+            env_name: str,
+            algorithm_name: str,
+            base_log_dir: str = "tensorboard_logs",
+            base_model_dir: str = "models",
+            base_video_dir: str = "video_dir",
+            total_timesteps: int = 1_000_000
     ):
-        self.env_id = env_id
-        self.log_dir = log_dir
-        self.model_save_path = model_save_path
+        self.env_name = env_name
         self.env = None
-        self.model = None
+        self.algorithm_name = algorithm_name
+        self.base_log_dir = Path(base_log_dir)
+        self.base_model_dir = Path(base_model_dir)
+        self.base_video_dir = Path(base_video_dir)
+        self.total_timesteps = total_timesteps
 
-    def create_env(self):
-        self.env = make_vec_env(self.env_id, n_envs=1)
+        # Create directories if they don't exist
+        for directory in [self.base_log_dir, self.base_model_dir, self.base_video_dir]:
+            directory.mkdir(parents=True, exist_ok=True)
 
-    def create_model(self, algorithm, params):
-        assert 'policy' in params.keys(), "Policy must be specified in the params"
-        assert params['policy'] in ['MlpPolicy', 'MultiInputPolicy', 'CnnPolicy'], "Policy must be one of [MlpPolicy, MultiInputPolicy, CnnPolicy]"
-        assert isinstance(algorithm, (PPO, DQN, A2C)), "Algorithm must be one of [PPO, DQN, A2C]"
+    def setup_environment(
+            self,
+            run_type: str,
+    ) -> tuple[List[str], str, str, str]:
+        """
+        Configure the environment based on the specified run type.
 
-        self.model = algorithm("MlpPolicy", self.env, tensorboard_log=self.log_dir)
+        Args:
+            run_type: One of 'all', 'llm', or 'manual'
 
-    def train(self,total_timesteps=1_000_000,):
-        self.model.learn(total_timesteps=total_timesteps)
-        self.model.save(self.model_save_path)
+        Returns:
+            Tuple of (features, log_name, model_save_path, video_dir)
+        """
+        self.env = Environment(self.env_name)(render_mode='rgb_array')
+        to_log_name = '{}_{}_{}_features'.format(self.algorithm_name, self.env_name, run_type)
+        model_save_name = str(self.base_model_dir / '{}_{}_{}'.format(self.algorithm_name, self.env_name, run_type))
+        video_dir = str(self.base_video_dir / '{}_{}_{}_features'.format(self.algorithm_name, self.env_name, run_type))
+        if run_type == 'all':
+            features = self.env.get_observation_space_dict()
 
-    def run_experiment(self):
-        self.create_env()
-        self.create_model()
-        self.train()
+        elif run_type == 'llm':
+            state_representor = Function_Calling_State_Representor(
+                env_description=self.env.env_description,
+                task_distribution=self.env.task_description
+            )
+            features = self.env.get_observation_space_dict()
+            selected_features = list(state_representor.select_features(features, debug=True))
+            self.env.select_feature_subset(features=selected_features)
+            features = selected_features
+
+        elif run_type == 'manual':
+            features = ['Box_position', 'Agent_position', 'box_visible', 'Agent_direction_vector']
+            self.env.select_feature_subset(features=features)
+
+        else:
+            raise ValueError("Invalid run type. Please select one of 'all', 'llm', or 'manual'.")
+
+        return features, to_log_name, model_save_name, video_dir
+
+    def train(
+            self,
+            tensorboard_logs_dir: str,
+            to_log_name: str,
+            model_save_name: str,
+            video_dir: str,
+    ) -> None:
+        """
+        Train the model and record a video of its performance.
+        """
+        # Initialize and train the model
+        model = Algorithm(self.algorithm_name)(
+            policy="MultiInputPolicy",
+            env=self.env,
+            verbose=1,
+            tensorboard_log=tensorboard_logs_dir,
+        )
+        model.learn(total_timesteps=self.total_timesteps, log_interval=4, tb_log_name=to_log_name)
+        model.save(model_save_name)
+
+        # Record video of trained model
+        env = RecordVideo(self.env, video_folder=video_dir, episode_trigger=lambda episode_id: True)
+        obs, info = env.reset()
+        env.start_video_recorder()
+
+        for _ in trange(1000):
+            action, _states = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+            env.render()
+            if terminated or truncated:
+                obs, info = env.reset()
+
+        env.close_video_recorder()
+        env.close()
+
+    def run_experiment(self, run_type: str) -> None:
+        """
+        Run a complete experiment with the specified configuration.
+
+        Args:
+            run_type: One of 'all', 'llm', or 'manual'
+        """
+        # Setup environment and get configuration
+        features, to_log_name, model_save_name, video_dir = self.setup_environment(
+            run_type=run_type,
+        )
+
+        # Run training
+        self.train(
+            tensorboard_logs_dir=str(self.base_log_dir),
+            to_log_name=to_log_name,
+            model_save_name=model_save_name,
+            video_dir=video_dir,
+        )
 
 
-if __name__ == "__main__":
-    manager = ExperimentManager(env_id="custom_fourrooms_miniworld")
-    manager.run_experiment()

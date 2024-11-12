@@ -8,6 +8,9 @@ pettingzoo
 pygame
 hydra-core
 opencv-python
+langchain
 langchain-google-genai
 google-generativeai
 tensorboard
+rl_zoo3
+#conda install anaconda::libglu

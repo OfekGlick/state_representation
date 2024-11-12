@@ -1,35 +1,47 @@
-import hydra
-import omegaconf
-from envs import simple_env
-from stable_baselines3.common.env_util import DummyVecEnv
-from pettingzoo.mpe import simple_v3
-from constants import *
-from stable_baselines3 import PPO
-from state_representors.textual_state_representation import Textual_State_Representor
+import argparse
+from experiment_manager import ExperimentManager
 
-"""
-"""
+def main():
+    """
+    Main entry point for running experiments.
+    """
+    parser = argparse.ArgumentParser(description='Run training with different feature sets.')
+    parser.add_argument(
+        '--run_type',
+        type=str,
+        choices=['all', 'llm', 'manual'],
+        default='all',
+        help='Specify which run to execute: all features, LLM based features, or manual features.'
+    )
+    parser.add_argument(
+        '--algorithm_name',
+        type=str,
+        choices=['dqn', 'ppo', 'a2c'],
+        default='ppo',
+        help='Specify which RL algorithm to use (default: PPO).'
+    )
+    parser.add_argument(
+        '--env_name',
+        type=str,
+        choices=['fourrooms', 'hallway'],
+        default='hallway',
+        help='Specify which environment to use (default: hallway).'
+    )
+    parser.add_argument(
+        '--total_timesteps',
+        type=int,
+        default=1_000_000,
+        help='Specify the total number of timesteps to train for (default: 5,000,000).'
+    )
+    args = parser.parse_args()
 
-@hydra.main(
-    config_path="conf",
-    config_name="config",
-    version_base='1.3',
-)
-def main(dict_config: omegaconf.DictConfig):
-    print(dict_config)
-    if dict_config.env.simple:
-        env = simple_v3.env(render_mode='rgb_array', continuous_actions=True)
-        gym_env = simple_env.CustomSimpleEnv(env)
-        gym_env.print_observation_structure()
-        obs, _ = gym_env.reset()
-        gym_env.print_observation_structure(obs)
-        obs_docs = gym_env.get_observation_info()
-        print(obs_docs)
-        env_description = SimpleConstants.ENV_DESCRIPTION
-        env_task_distribution = SimpleConstants.TASK_DESCRIPTION
-    else:
-        raise ValueError(f"Please specify a valid environment in the config file.")
-
+    # Create experiment manager and run experiment
+    experiment_manager = ExperimentManager(
+        env_name=args.env_name,
+        algorithm_name=args.algorithm_name,
+        total_timesteps=args.total_timesteps,
+    )
+    experiment_manager.run_experiment(run_type=args.run_type)
 
 
 if __name__ == '__main__':

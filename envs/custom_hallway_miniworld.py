@@ -15,15 +15,15 @@ COLOR_TO_IDX = {
 }
 
 
-class CustomFourRoomsEnv(gym.Env):
+class CustomHallwayEnv(gym.Env):
     def __init__(
             self,
             render_mode='rgb_array',
     ):
-        super(CustomFourRoomsEnv, self).__init__()
-        self.env = gym.make("MiniWorld-FourRooms-v0", domain_rand=True, render_mode=render_mode)
+        super(CustomHallwayEnv, self).__init__()
+        self.env = gym.make("MiniWorld-Hallway-v0", domain_rand=True, render_mode=render_mode)
         self.env_description = """
-        The FourRooms environment a 3D world consisting of four connected rooms.
+        The Hallway environment is a 3D world consisting of one hallway.
         The agent has three discrete actions: turn left, turn right, move forward. 
         """
         self.task_description = """
@@ -50,8 +50,7 @@ class CustomFourRoomsEnv(gym.Env):
                 continue
             if bounds.type == 'float':
                 if isinstance(bounds.default, np.ndarray):
-                    param_bounds[feature] = gym.spaces.Box(low=bounds.min, high=bounds.max,
-                                                           shape=(len(bounds.default),))
+                    param_bounds[feature] = gym.spaces.Box(low=bounds.min, high=bounds.max, shape=(len(bounds.default),))
                 elif isinstance(bounds.default, float):
                     param_bounds[feature] = gym.spaces.Box(low=bounds.min, high=bounds.max, shape=(1,))
             elif bounds.type == 'int':
@@ -63,9 +62,7 @@ class CustomFourRoomsEnv(gym.Env):
         entities = self.env.unwrapped.entities
         for entity in entities:
             for attr in dir(entity):
-                if not attr.startswith('_') and not callable(getattr(entity, attr)) and attr in ['size', 'pos',
-                                                                                                 'cam_pos', 'cam_dir',
-                                                                                                 'dir_vec']:
+                if not attr.startswith('_') and not callable(getattr(entity, attr)) and attr in ['size', 'pos', 'cam_pos', 'cam_dir', 'dir_vec']:
                     if 'pos' in attr:
                         param_bounds["_".join([entity.name, attr])] = gym.spaces.Box(
                             low=np.array((self.env.unwrapped.min_x, float('-inf'), self.env.unwrapped.min_z)),
@@ -103,9 +100,7 @@ class CustomFourRoomsEnv(gym.Env):
         entities = self.env.unwrapped.entities
         for entity in entities:
             for attr in dir(entity):
-                if not attr.startswith('_') and not callable(getattr(entity, attr)) and attr in ['size', 'pos',
-                                                                                                 'cam_pos', 'cam_dir',
-                                                                                                 'dir_vec']:
+                if not attr.startswith('_') and not callable(getattr(entity, attr)) and attr in ['size', 'pos', 'cam_pos', 'cam_dir', 'dir_vec']:
                     features[entity.name + "_" + attr] = np.array(getattr(entity, attr), dtype=np.float32)
                 elif not attr.startswith('_') and not callable(getattr(entity, attr)) and attr in ['color']:
                     features[entity.name + "_" + attr] = np.array(COLOR_TO_IDX[getattr(entity, attr)], dtype=np.float32)
@@ -119,8 +114,7 @@ class CustomFourRoomsEnv(gym.Env):
             observation_dict[new_feature] = features[feature]
 
         if self.filter_flag:
-            observation_dict = {feature: value for feature, value in observation_dict.items() if
-                                feature in self.all_features}
+            observation_dict = {feature: value for feature, value in observation_dict.items() if feature in self.all_features}
         return observation_dict
 
     def select_feature_subset(self, features=None):
@@ -161,22 +155,7 @@ class CustomFourRoomsEnv(gym.Env):
         self.env.close()
 
 
-# if __name__ == '__main__':
-#     env = CustomFourRoomsEnv(
-#         render_mode='rgb_array',
-#     )
-#     model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./dqn_fourrooms_tensorboard/")
-#     print("Training model...")
-#     model.learn(total_timesteps=1000000, log_interval=4, tb_log_name="second_run")
-#     print("Done!")
-#     model.save("ppo_custom_fourrooms")
-#     model = PPO.load("ppo_custom_fourrooms")
-#     env = RecordVideo(env, video_folder='./videos', episode_trigger=lambda episode_id: True)
-#     obs, info = env.reset()
-#     for _ in trange(1000):
-#         action, _states = model.predict(obs, deterministic=True)
-#         obs, reward, terminated, truncated, info = env.step(action)
-#         env.render()
-#         if terminated or truncated:
-#             obs, info = env.reset()
-#     env.close()
+if __name__ == '__main__':
+    env = CustomHallwayEnv(
+        render_mode='rgb_array',
+    )
