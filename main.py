@@ -31,7 +31,7 @@ def main():
         '--total_timesteps',
         type=int,
         default=1_000_000,
-        help='Specify the total number of timesteps to train for (default: 5,000,000).'
+        help='Specify the total number of timesteps to train for (default: 1,000,000).'
     )
     args = parser.parse_args()
 

@@ -4,6 +4,9 @@ from gymnasium.wrappers import RecordVideo
 from tqdm import trange
 from utils import Algorithm, Environment
 from state_representors.function_calling_state_representation import Function_Calling_State_Representor
+import wandb
+import os
+from wandb.integration.sb3 import WandbCallback
 
 
 class ExperimentManager:
@@ -15,9 +18,9 @@ class ExperimentManager:
             self,
             env_name: str,
             algorithm_name: str,
-            base_log_dir: str = "tensorboard_logs",
-            base_model_dir: str = "models",
-            base_video_dir: str = "video_dir",
+            base_log_dir: str = "results/tensorboard_logs",
+            base_model_dir: str = "results/models",
+            base_video_dir: str = "results/video_dir",
             total_timesteps: int = 1_000_000
     ):
         self.env_name = env_name
@@ -50,8 +53,7 @@ class ExperimentManager:
         model_save_name = str(self.base_model_dir / '{}_{}_{}'.format(self.algorithm_name, self.env_name, run_type))
         video_dir = str(self.base_video_dir / '{}_{}_{}_features'.format(self.algorithm_name, self.env_name, run_type))
         if run_type == 'all':
-            features = self.env.get_observation_space_dict()
-
+            features = list(self.env.get_observation_space_dict().keys())
         elif run_type == 'llm':
             state_representor = Function_Calling_State_Representor(
                 env_description=self.env.env_description,
@@ -65,7 +67,6 @@ class ExperimentManager:
         elif run_type == 'manual':
             features = ['Box_position', 'Agent_position', 'box_visible', 'Agent_direction_vector']
             self.env.select_feature_subset(features=features)
-
         else:
             raise ValueError("Invalid run type. Please select one of 'all', 'llm', or 'manual'.")
 
@@ -77,25 +78,40 @@ class ExperimentManager:
             to_log_name: str,
             model_save_name: str,
             video_dir: str,
+            features: List[str]
     ) -> None:
         """
         Train the model and record a video of its performance.
         """
+
+        config = {
+            'env_name': self.env_name,
+            'algorithm_name': self.algorithm_name,
+            'total_timesteps': self.total_timesteps,
+            'features': features,
+        }
+        run = wandb.init(
+            project='rl-feature-selection',
+            name=to_log_name,
+            config=config,
+            sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+            monitor_gym=True,  # auto-upload the videos of agents playing the game
+        )
+
         # Initialize and train the model
         model = Algorithm(self.algorithm_name)(
             policy="MultiInputPolicy",
             env=self.env,
             verbose=1,
-            tensorboard_log=tensorboard_logs_dir,
+            tensorboard_log=os.path.join(tensorboard_logs_dir, run.id),
         )
+
         model.learn(total_timesteps=self.total_timesteps, log_interval=4, tb_log_name=to_log_name)
         model.save(model_save_name)
 
         # Record video of trained model
         env = RecordVideo(self.env, video_folder=video_dir, episode_trigger=lambda episode_id: True)
         obs, info = env.reset()
-        env.start_video_recorder()
-
         for _ in trange(1000):
             action, _states = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
@@ -103,8 +119,8 @@ class ExperimentManager:
             if terminated or truncated:
                 obs, info = env.reset()
 
-        env.close_video_recorder()
         env.close()
+        run.finish()
 
     def run_experiment(self, run_type: str) -> None:
         """
@@ -117,13 +133,14 @@ class ExperimentManager:
         features, to_log_name, model_save_name, video_dir = self.setup_environment(
             run_type=run_type,
         )
-
+        print("Features selected: ", features)
         # Run training
         self.train(
             tensorboard_logs_dir=str(self.base_log_dir),
             to_log_name=to_log_name,
             model_save_name=model_save_name,
             video_dir=video_dir,
+            features=features
         )
 
 
